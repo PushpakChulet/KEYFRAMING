@@ -13,6 +13,8 @@
 // screen size
 int g_screenWidth  = 0;
 int g_screenHeight = 0;
+GLfloat t = 0.0f; 
+GLfloat dt = 0.01f;
 
 // frame index
 int g_frameIndex = 0;
@@ -20,7 +22,166 @@ int g_frameIndex = 0;
 // angle for rotation
 int g_angle = 0;
 
-float CatmullRom( float u, float x0, float x1, float x2, float x3 );
+
+GLint P = 0 ;
+GLint N = 7;
+GLfloat funcQT(GLfloat T[4], GLfloat mati[16], GLfloat controlpoints[4])
+{
+	GLfloat tempres[4] = { 0 };
+	GLfloat Qt = 0;
+
+	for (int i = 0; i < 4; i++) 
+		for (int j = 0; j < 4; j++) 
+			tempres[i] += T[j] * mati[4 * i + j];
+
+	// Calcualte Qt
+	for (int i = 0; i < 4; i++) 
+		Qt += tempres[i] * controlpoints[i];
+	
+	return Qt;
+}
+
+GLfloat temp[16] = { 
+	0, 0, 0, 0,
+	0, 0, 0, 0,
+	0, 0, 0, 0,
+	0, 0, 0, 0
+};
+
+GLfloat Mcat[16] = { 
+	-0.5f,	1.0f,	-0.5f,	0.0f,	  
+	1.5f,	-2.5f,	0.0f,	1.0f,      
+	-1.5f,	2.0f,	0.5f,	0.0f,      
+	0.5f,	-0.5f,	0.0f,	0.0f 
+};    
+
+GLfloat MBspline[16] = { 
+	-1.0/ 6.0,	3.0f / 6.0f,	-3.0f / 6.0f,	1.0f / 6.0f,
+	3.0f / 6.0f,	-6.0f / 6.0f,	0.0f / 6.0f,	4.0f / 6.0f, 
+	-3.0f / 6.0f,	3.0f / 6.0f,	3.0f / 6.0f,	1.0f / 6.0f, 
+	1.0f / 6.0f,	0.0f / 6.0f,	0.0f / 6.0f,	0.0f / 6.0f 
+};
+
+GLfloat contorlpoints_quats[7][7] = {
+	{ 1, 0, 0, 0, -5, 0, -5 },   
+	{ 0, 1, 0, 0, -3, 3, -10 },  
+	{ 0, 0, 1, 0, -1, 1, -15 },  
+	{ 0, 0, 0, 1, 0, -5, -20 },  
+	{ 0, 0, 1, 0, 1, 1, -15 },   
+	{ 0, 1, 0, 0, 3, 3, -10 },  
+	{ 1, 0, 0, 0, 5, 0, -5 } }; 
+
+GLfloat contorlpoints_euler[7][6] = {
+	{ 0.0, 0.0, 1.5, 0.0, 0, -5 },	
+	{ 0.0, 1.0, 0.5, -3, 3, -10 },
+	{ 0.0, -2.2, 2.5, -1, 0, -1 },
+	{ 1.0, 0.0, 0.5, 0, -5, -20 },
+	{ 0.8, 3.0, -0.5, 1, 1, -15 },
+	{ 0.0, 1.0, -0.5, 3, 3, -10 },
+	{ 0.0, -2.0, -0.5, 5, 0, -5 },
+};
+
+void quatToVect(GLfloat quat[7])
+{
+	GLfloat length = sqrt(quat[0] * quat[0] + quat[1] * quat[1] + quat[2] * quat[2] + quat[3] * quat[3]);
+	
+	// base case
+	if (length == 0)
+		return;
+
+	for (int i = 0; i < 4; i++) 
+		quat[i] /= length;
+}
+
+void quatToRot(GLfloat quat[7], GLfloat rMat[16])
+{
+	GLfloat tempmat[4][4];
+	for (int i = 0; i < 4; i++) 
+		for (int j = 0; j < 4; j++) 
+			tempmat[i][j] = quat[i] * quat[j];
+	
+	rMat[0] = 1.0f - 2.0f * tempmat[2][2] - 2.0f * tempmat[3][3];
+	rMat[1] = 2.0f * tempmat[1][2] + 2.0f * tempmat[0][3];
+	rMat[2] = 2.0f * tempmat[1][3] - 2.0f * tempmat[0][2];		   
+	rMat[3] = 0.0f;					   
+	rMat[4] = 2.0f * tempmat[1][2] - 2.0f * tempmat[0][3];
+	rMat[5] = 1.0f - 2.0f * tempmat[1][1] - 2.0f * tempmat[3][3];
+	rMat[6] = 2.0f * tempmat[2][3] + 2.0f * tempmat[0][1];
+	rMat[7] = 0.0f;					  
+	rMat[8] = 2.0f * tempmat[1][3] + 2.0f * tempmat[0][2];
+	rMat[9] = 2.0f * tempmat[2][3] - 2.0f * tempmat[0][1];
+	rMat[10] = 1.0f - 2.0f * tempmat[1][1] - 2.0f * tempmat[2][2];
+	rMat[11] = 0.0f;					   
+	rMat[12] = quat[4];				   
+	rMat[13] = quat[5];			       
+	rMat[14] = quat[6];			       
+	rMat[15] = 1.0f;					   
+}
+
+GLfloat* eToQ(GLfloat euler_angles[6]) {
+	GLfloat x = euler_angles[0] / 2;
+	GLfloat y = euler_angles[1] / 2;
+	GLfloat z = euler_angles[2] / 2;
+	static GLfloat ans[7];
+	ans[0] = cos(z) * cos(y) * cos(z) + sin(z) * sin(y) * sin(x);
+	ans[1] = sin(z) * cos(y) * cos(z) - cos(z) * sin(y) * sin(x);
+	ans[2] = cos(z) * sin(y) * cos(z) + sin(z) * cos(y) * sin(x);
+	ans[3] = cos(z) * cos(y) * sin(z) - sin(z) * sin(y) * cos(x);
+	ans[4] = euler_angles[3];
+	ans[5] = euler_angles[4];
+	ans[6] = euler_angles[5];
+
+	return ans;
+}
+
+
+void toQuats(float quat[6][7], float spline[16]) {
+	// Set up T matrix T = {t*t*t,t*t,t,1}
+	float t_matrix[4] = { t * t * t, t * t, t, 1 };
+
+	// interpolation orientation and position
+	float quatval[7];
+
+	for (int i = 0; i < 7; i++)
+	{
+		float M[4] = { 
+			quat[P][i],
+			quat[P + 1][i],
+			quat[P + 2][i],
+			quat[P + 3][i] 
+		};
+
+		quatval[i] = funcQT(t_matrix, spline, M);
+	}
+
+	quatToVect(quatval);
+	quatToRot(quatval, temp);
+}
+
+void toEuler(float euler[7][6], float spline[16])
+{
+	// Set up T matrix T = {t*t*t,t*t,t,1}
+	GLfloat T[4] = { t * t * t, t * t, t, 1 };
+
+	// interpolation orientation and position
+	GLfloat valEuler[7];
+
+	for (int i = 0; i < 7; i++)
+	{
+		GLfloat M[4] = { 
+			euler[P][i],
+			euler[P + 1][i],
+			euler[P + 2][i],
+			euler[P + 3][i] 
+		};
+
+		valEuler[i] = funcQT(T, spline, M);
+	}
+
+	GLfloat* valQuat = eToQ(valEuler);
+	quatToVect(valQuat);
+	quatToRot(valQuat, temp);
+}
 
 //================================
 // init
@@ -38,70 +199,6 @@ void update( void ) {
 	// rotation angle
 	g_angle = ( g_angle + 5 ) % 360;
 }
-
-float CatmullRom( float u, float x0, float x1, float x2, float x3 )
-{
-    float u2 = u * u;
-    float u3 = u2 * u;
-    return ((2 * x1) + 
-           (-x0 + x2) * u + 
-           (2*x0 - 5*x1 + 4*x2 - x3) * u2 + 
-           (-x0 + 3*x1 - 3*x2 + x3) * u3) * 0.5f;
-}
-void display()
-{
-	glClear(GL_COLOR_BUFFER_BIT);
-
-	glBegin(GL_POLYGON);
-	glVertex3f(-0.5, -0.5, -0.5);       // P1
-	glVertex3f(-0.5, 0.5, -0.5);       // P2
-	glVertex3f(0.5, 0.5, -0.5);       // P3
-	glVertex3f(0.5, -0.5, -0.5);       // P4
-	glEnd();
-
-	glBegin(GL_POLYGON);
-	glColor3f(1.0, 1.0, 1.0);
-	glVertex3f(0.5, -0.5, 0.5);
-	glVertex3f(0.5, 0.5, 0.5);
-	glVertex3f(-0.5, 0.5, 0.5);
-	glVertex3f(-0.5, -0.5, 0.5);
-	glEnd();
-	
-	glBegin(GL_POLYGON);
-	glColor3f(1.0, 0.0, 1.0);
-	glVertex3f(0.5, -0.5, -0.5);
-	glVertex3f(0.5, 0.5, -0.5);
-	glVertex3f(0.5, 0.5, 0.5);
-	glVertex3f(0.5, -0.5, 0.5);
-	glEnd();
-
-	glBegin(GL_POLYGON);
-	glColor3f(0.0, 1.0, 0.0);
-	glVertex3f(-0.5, -0.5, 0.5);
-	glVertex3f(-0.5, 0.5, 0.5);
-	glVertex3f(-0.5, 0.5, -0.5);
-	glVertex3f(-0.5, -0.5, -0.5);
-	glEnd();
-
-	glBegin(GL_POLYGON);
-	glColor3f(0.0, 0.0, 1.0);
-	glVertex3f(0.5, 0.5, 0.5);
-	glVertex3f(0.5, 0.5, -0.5);
-	glVertex3f(-0.5, 0.5, -0.5);
-	glVertex3f(-0.5, 0.5, 0.5);
-	glEnd();
-
-	glBegin(GL_POLYGON);
-	glColor3f(1.0, 0.0, 0.0);
-	glVertex3f(0.5, -0.5, -0.5);
-	glVertex3f(0.5, -0.5, 0.5);
-	glVertex3f(-0.5, -0.5, 0.5);
-	glVertex3f(-0.5, -0.5, -0.5);
-	glEnd();
-
-	glFlush(); 
-}
-
 //================================
 // render
 //================================
@@ -145,15 +242,10 @@ void render( void ) {
 
 	// modelview matrix
 	glMatrixMode( GL_MODELVIEW );
-	glLoadIdentity();
-	glTranslatef (0.0, 0.0, -5.0);
-	glRotated(g_angle, 0.0, 1.0, 0.0);
-
-	//float catmullroll = CatmullRom();
-
+	
 	// render objects
-	// glutSolidTeapot(1.0);
-	display();
+	glLoadMatrixf(temp);
+	glutSolidTeapot(1.0);
 	
 
 	// disable lighting
@@ -169,7 +261,24 @@ void render( void ) {
 //================================
 void keyboard( unsigned char key, int x, int y ) 
 {
-
+	//press and hold each key contineously to see the object move
+	switch (key)
+	{
+	case 'a':
+		toQuats(contorlpoints_quats, Mcat);
+		break;
+	case 's':
+		toQuats(contorlpoints_quats,MBspline);
+		break;
+	case 'w':
+		toEuler(contorlpoints_euler, Mcat);
+		break;
+	case 'd':
+		toEuler(contorlpoints_euler,MBspline);
+		break;
+	default:
+		break;
+	}
 }
 
 //================================
@@ -195,18 +304,28 @@ void reshape( int w, int h ) {
 //================================
 void timer( int value ) 
 {	
-	// increase frame index
-	g_frameIndex++;
-
-	update();
-	
-	// render
 	glutPostRedisplay();
 
+	t += dt;
+	if (t >= 1)
+	{
+		t = 0;
+		if (P < N - 4) {
+			P++;
+		}
+		else {
+			P = 0;
+		}
+	}
 	// reset timer
-	// 16 ms per frame ( about 60 frames per second )
-	glutTimerFunc( 16, timer, 0 );
+	glutTimerFunc(16, timer, 0);
 }
+
+struct Resolution {
+	int w;
+	int h;
+
+};
 
 //================================
 // main
